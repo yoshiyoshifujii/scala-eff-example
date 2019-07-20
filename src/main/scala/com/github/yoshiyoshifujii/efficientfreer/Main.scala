@@ -21,6 +21,33 @@ object Main extends App {
     def :+[C](f: B => Freer[F, C]): Arrows[F, A, C] = Node(this, Leaf(f))
 
     def ++[C](q: Arrows[F, B, C]): Arrows[F, A, C] = Node(this, q)
+
+    def view: View[F, A, B] =
+      this match {
+        case Leaf(f) => One(f)
+        case Node(l, r) =>
+          @scala.annotation.tailrec
+          def go[T](x: Arrows[F, A, T], y: Arrows[F, T, B]): View[F, A, B] =
+            x match {
+              case Leaf(f) => Cons(f, y)
+              case Node(l, r) => go(l, Node(r, y))
+            }
+          go(l, r)
+      }
+
+    def apply(a: A): Freer[F, B] = {
+      @scala.annotation.tailrec
+      def go[G](arrows: Arrows[F, G, B], a: G): Freer[F, B] =
+        arrows.view match {
+          case One(f) => f(a)
+          case Cons(f, r) =>
+            f(a) match {
+              case Pure(v) => go(r, v)
+              case Impure(fa, l) => Impure(fa, l ++ r)
+            }
+        }
+      go(this, a)
+    }
   }
 
   case class Leaf[F[_], A, B](f: A => Freer[F, B]) extends Arrows[F, A, B]
@@ -31,4 +58,9 @@ object Main extends App {
     def apply[F[_], A](fa: F[Freer[F, A]]): Freer[F, A] = Impure(fa, Leaf((a: Freer[F, A]) => a))
   }
 
+  sealed trait View[F[_], A, B]
+
+  case class One[F[_], A, B](f: A => Freer[F, B]) extends View[F, A, B]
+
+  case class Cons[F[_], A, B, C](f: A => Freer[F, B], k: Arrows[F, B, C]) extends View[F, A, C]
 }
